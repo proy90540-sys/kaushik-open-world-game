@@ -1,0 +1,592 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Open World India - Kaushik & Raunak</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;background:#83c9ef;font-family:Arial}
+canvas{display:block}
+#hud{position:fixed;top:12px;left:12px;color:white;
+background:#101923d9;padding:14px;border-radius:12px;
+line-height:1.7;font-size:13px;z-index:2}
+#help{position:fixed;bottom:12px;left:12px;color:white;
+background:#101923d9;padding:12px;border-radius:10px;
+font-size:12px;line-height:1.7;z-index:2}
+#banner{position:fixed;top:12px;left:50%;transform:translateX(-50%);
+background:#101923d9;color:white;padding:12px 18px;
+border-radius:10px;text-align:center;z-index:2}
+#crosshair{position:fixed;top:50%;left:50%;color:white;
+transform:translate(-50%,-50%);font-size:22px;pointer-events:none}
+#start{position:fixed;inset:0;display:grid;place-items:center;
+background:#10283beF;color:white;z-index:5;text-align:center}
+#start button{padding:13px 24px;border:0;border-radius:8px;
+background:#f5c451;font-weight:bold;font-size:17px;cursor:pointer}
+.small{color:#c9d9e7;font-size:13px;max-width:440px;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="start">
+ <div>
+  <h1>OPEN WORLD INDIA</h1>
+  <p>Kaushik &amp; Raunak's Adventure</p>
+  <p class="small">Explore the city, visit your home, drive cars and discover the beach.</p>
+  <button id="play">START GAME</button>
+  <p class="small">Best played on a computer with a keyboard and mouse.</p>
+ </div>
+</div>
+<div id="hud">
+ <b>OPEN WORLD INDIA</b><br>
+ Player: <span id="playerName">Kaushik</span><br>
+ Mode: <span id="mode">On foot</span><br>
+ Location: <span id="place">Home Street</span><br>
+ Speed: <span id="speed">0</span> km/h<br>
+ <span id="message">Explore your city!</span>
+</div>
+<div id="banner">KAUSHIK'S CITY <br><small>Friends • Freedom • Adventure</small></div>
+<div id="crosshair">+</div>
+<div id="help">
+ <b>CONTROLS</b><br>
+ W A S D — Move / Drive<br>
+ Mouse — Look around<br>
+ SHIFT — Sprint<br>
+ SPACE — Jump<br>
+ E — Enter / Exit car or home<br>
+ F — Interact with nearby places<br>
+ ESC — Release mouse
+</div>
+
+<script type="module">
+import * as THREE from
+'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x8ed4f7);
+scene.fog=new THREE.Fog(0x8ed4f7,160,650);
+
+const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,1200);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.75));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.15;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xc8eaff,0x68744a,2.1));
+const sun=new THREE.DirectionalLight(0xfff0d2,3);
+sun.position.set(-100,160,80);
+sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-180;
+sun.shadow.camera.right=180;
+sun.shadow.camera.top=180;
+sun.shadow.camera.bottom=-180;
+scene.add(sun);
+
+const mat=(color,roughness=.8,metalness=0)=>
+ new THREE.MeshStandardMaterial({color,roughness,metalness});
+
+const M={
+ grass:mat(0x659b50),road:mat(0x30363d),sidewalk:mat(0xbcb8a9),
+ white:mat(0xf5f0dc),yellow:mat(0xf5c74b),
+ skin:mat(0xb97b54),shirt:mat(0x2876cb),
+ pants:mat(0x252d3d),shoe:mat(0x20252c),
+ glass:mat(0x87cde6,.22,.15),
+ tire:mat(0x181b20),metal:mat(0x9da9b4,.3,.7),
+ red:mat(0xc93636),leaf:mat(0x39814a),
+ trunk:mat(0x765038)
+};
+
+function meshBox(parent,w,h,d,material,x,y,z){
+ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),material);
+ m.position.set(x,y,z);
+ m.castShadow=true;
+ m.receiveShadow=true;
+ parent.add(m);
+ return m;
+}
+function cylinder(parent,r1,r2,h,material,x,y,z,segments=12){
+ const m=new THREE.Mesh(
+  new THREE.CylinderGeometry(r1,r2,h,segments),material);
+ m.position.set(x,y,z);
+ m.castShadow=true;
+ parent.add(m);
+ return m;
+}
+function sphere(parent,r,material,x,y,z){
+ const m=new THREE.Mesh(new THREE.SphereGeometry(r,16,12),material);
+ m.position.set(x,y,z);
+ m.castShadow=true;
+ parent.add(m);
+ return m;
+}
+
+// World ground and sea
+meshBox(scene,1000,2,1000,M.grass,0,-1.2,0);
+const sea=meshBox(scene,1000,.5,1000,mat(0x249dd1,.35),0,-1.1,-760);
+sea.receiveShadow=false;
+
+// Main city roads
+const roadLines=[];
+for(let z=-500;z<=500;z+=100){
+ meshBox(scene,1000,.15,15,M.road,0,-.08,z);
+ for(let x=-490;x<500;x+=15)
+  meshBox(scene,4,.025,.17,M.yellow,x,.015,z);
+}
+for(let x=-500;x<=500;x+=100){
+ meshBox(scene,15,.15,1000,M.road,x,-.08,0);
+ for(let z=-490;z<500;z+=15)
+  meshBox(scene,.17,.025,4,M.white,x,.015,z);
+}
+
+// Sidewalks
+for(let z=-500;z<=500;z+=100){
+ for(const s of [-1,1])
+  meshBox(scene,1000,.2,3,M.sidewalk,0,-.05,z+s*10);
+}
+for(let x=-500;x<=500;x+=100){
+ for(const s of [-1,1])
+  meshBox(scene,3,.2,1000,M.sidewalk,x+s*10,-.05,0);
+}
+
+// Buildings
+const buildingBoxes=[];
+const buildingPalette=[
+ 0xe8d5b6,0xf2e8d7,0xd5c8bb,0xc6d6dd,
+ 0xe3bda0,0xf0d9d9,0xc9d6b4,0xe9c65f
+];
+
+function makeBuilding(x,z,w,h,d,color,label){
+ const g=new THREE.Group();
+ g.position.set(x,0,z);
+ scene.add(g);
+
+ meshBox(g,w,h,d,mat(color),0,h/2,0);
+ meshBox(g,w+.5,.6,d+.5,mat(0x665957),0,h+.3,0);
+
+ // Ground-floor shopfronts / windows
+ const floors=Math.max(1,Math.floor(h/3.5));
+ for(let f=0;f<floors;f++){
+  for(let xx=-w/2+2;xx<w/2-1.2;xx+=3.4){
+   meshBox(g,1.7,1.8,.10,M.glass,xx,2.2+f*3.4,d/2+.055);
+  }
+ }
+
+ // Entrance
+ meshBox(g,1.8,2.7,.16,mat(0x60422d),0,1.35,d/2+.12);
+ meshBox(g,2.8,.65,.25,mat(0xf7d17b),0,3,d/2+.22);
+
+ if(label){
+  const c=document.createElement('canvas');
+  c.width=512;c.height=128;
+  const ctx=c.getContext('2d');
+  ctx.fillStyle='#182b39';ctx.fillRect(0,0,512,128);
+  ctx.fillStyle='#fff3ce';ctx.font='bold 48px Arial';
+  ctx.textAlign='center';ctx.fillText(label,256,81);
+  const tex=new THREE.CanvasTexture(c);
+  const sign=new THREE.Mesh(
+   new THREE.PlaneGeometry(Math.min(w-1,12),2),
+   new THREE.MeshBasicMaterial({map:tex})
+  );
+  sign.position.set(0,3.9,d/2+.24);
+  g.add(sign);
+ }
+
+ buildingBoxes.push({x,z,w,d,h,label,group:g});
+ return g;
+}
+
+// Player home is the starting point
+makeBuilding(22,24,17,9,16,0xf0d4b5,"KAUSHIK HOME");
+makeBuilding(70,25,20,15,18,0xd6e3e8,"CITY HOSPITAL");
+makeBuilding(70,-25,18,11,17,0xe6bb76,"MARKET");
+makeBuilding(-25,75,17,14,16,0xe0c5a8,"FOOD MART");
+makeBuilding(-75,25,20,19,18,0xe0c8ba,"CITY SHOP");
+makeBuilding(125,125,24,25,22,0xd4e0e9,"APARTMENTS");
+makeBuilding(-125,125,24,31,22,0xf0d3bb,"HOTEL");
+
+// More city blocks
+for(let x=-250;x<=250;x+=50){
+ for(let z=-250;z<=250;z+=50){
+  if(Math.abs(x)<95&&Math.abs(z)<95)continue;
+  if(Math.random()<.35)continue;
+  const w=17+Math.random()*12;
+  const d=17+Math.random()*12;
+  const h=9+Math.random()*32;
+  makeBuilding(x+(Math.random()-.5)*8,
+   z+(Math.random()-.5)*8,w,h,d,
+   buildingPalette[Math.floor(Math.random()*buildingPalette.length)]);
+ }
+}
+
+// Trees placed away from road centres
+function makeTree(x,z){
+ const g=new THREE.Group();
+ g.position.set(x,0,z);
+ scene.add(g);
+ cylinder(g,.55,.8,4,M.trunk,0,2,0,8);
+ for(let i=0;i<3;i++)
+  sphere(g,2.5-i*.25,
+   mat([0x28683d,0x39874a,0x4b9851][i]),
+   0,4.1+i*1.45,0);
+}
+for(let x=-290;x<=290;x+=28){
+ for(const s of [-1,1]){
+  makeTree(x,s*16);
+  makeTree(s*16,x);
+ }
+}
+
+// Distant mountains
+for(let i=0;i<30;i++){
+ const h=35+Math.random()*65;
+ const mountain=new THREE.Mesh(
+  new THREE.ConeGeometry(30+Math.random()*30,h,5),
+  mat(i%2?0x758c87:0x8a9d94)
+ );
+ mountain.position.set(-450+i*31,h/2,-480);
+ mountain.rotation.y=Math.random();
+ scene.add(mountain);
+}
+
+// Beach strip
+meshBox(scene,1000,.3,110,mat(0xe7d3a0),0,-.65,-660);
+for(let i=0;i<15;i++){
+ const palm=new THREE.Group();
+ palm.position.set(-400+i*55,0,-620);
+ scene.add(palm);
+ cylinder(palm,.4,.6,9,M.trunk,0,4.5,0,8);
+ for(let j=0;j<6;j++){
+  const leaf=meshBox(palm,.7,.16,6,mat(0x317a3f),
+   Math.sin(j*Math.PI/3)*2,8.7,Math.cos(j*Math.PI/3)*2);
+  leaf.rotation.y=j*Math.PI/3;
+  leaf.rotation.x=-.18;
+ }
+}
+
+// Human character with animated limbs
+function makeHuman(name,shirtColor){
+ const g=new THREE.Group();
+ const torso=meshBox(g,.85,1.05,.43,mat(shirtColor),0,1.9,0);
+ const neck=cylinder(g,.13,.13,.2,M.skin,0,2.5,0);
+ const head=sphere(g,.32,M.skin,0,2.83,0);
+
+ // Hair
+ sphere(g,.325,mat(0x241d19),0,3.01,-.045);
+
+ const armMat=mat(shirtColor);
+ const legMat=M.pants;
+ const arms=[],legs=[];
+
+ for(const s of [-1,1]){
+  const arm=new THREE.Group();
+  arm.position.set(s*.53,2.25,0);
+  meshBox(arm,.24,.75,.25,armMat,0,-.34,0);
+  cylinder(arm,.105,.11,.23,M.skin,0,-.82,0);
+  g.add(arm);arms.push(arm);
+
+  const leg=new THREE.Group();
+  leg.position.set(s*.23,1.25,0);
+  meshBox(leg,.30,.78,.31,legMat,0,-.34,0);
+  meshBox(leg,.34,.17,.49,M.shoe,0,-.79,.08);
+  g.add(leg);legs.push(leg);
+ }
+ return {group:g,arms,legs,name};
+}
+
+const kaushik=makeHuman("Kaushik",0x286fd0);
+scene.add(kaushik.group);
+kaushik.group.position.set(22,0,38);
+
+const raunak=makeHuman("Raunak",0xd44a42);
+scene.add(raunak.group);
+raunak.group.position.set(28,0,30);
+
+// Vehicles with detailed body, glass, lights and rotating wheels
+const cars=[];
+function makeCar(x,z,color,style="sport"){
+ const g=new THREE.Group();
+ const bodyColor=mat(color,.35,.25);
+
+ const length=style==="suv"?4.8:4.3;
+ const width=style==="suv"?2.05:1.95;
+
+ meshBox(g,width,.65,length,bodyColor,0,.85,0);
+ meshBox(g,width*.88,.65,length*.47,M.glass,
+  0,1.43,-.15);
+
+ // Bonnet and bumpers
+ meshBox(g,width*.94,.22,length*.30,bodyColor,0,1.08,length*.31);
+ meshBox(g,width*.95,.17,.2,M.metal,0,.62,length/2);
+ meshBox(g,width*.95,.17,.2,M.metal,0,.62,-length/2);
+
+ // Headlights
+ for(const s of [-1,1]){
+  meshBox(g,.35,.18,.08,mat(0xfff4c2),s*.58,.98,length/2+.04);
+  meshBox(g,.34,.18,.08,mat(0xf33b38),s*.58,.98,-length/2-.04);
+ }
+
+ const wheels=[];
+ for(const s of [-1,1]){
+  for(const a of [-1,1]){
+   const wheel=new THREE.Group();
+   wheel.position.set(s*(width/2+.04),.47,a*length*.32);
+   const tire=new THREE.Mesh(
+    new THREE.CylinderGeometry(.40,.40,.23,20),M.tire);
+   tire.rotation.z=Math.PI/2;
+   tire.castShadow=true;
+   wheel.add(tire);
+
+   const rim=new THREE.Mesh(
+    new THREE.CylinderGeometry(.22,.22,.245,12),M.metal);
+   rim.rotation.z=Math.PI/2;
+   wheel.add(rim);
+
+   g.add(wheel);wheels.push(wheel);
+  }
+ }
+
+ g.position.set(x,0,z);
+ scene.add(g);
+ cars.push({g,wheels,speed:0,angle:0,player:false,
+  length,width,color});
+ return cars[cars.length-1];
+}
+
+makeCar(22,49,0x172c45,"sport"); // player's home car
+makeCar(55,45,0xb7b7b7,"suv");
+makeCar(90,12,0xb32232,"sport");
+makeCar(-15,12,0x183e75,"sport");
+makeCar(120,80,0xd6d4ce,"suv");
+makeCar(-90,-80,0x202020,"sport");
+
+// Street traffic
+for(let i=0;i<8;i++){
+ const c=makeCar(-220+i*55,14,i%2?0x2e77b9:0xc7b33e);
+ c.speed=3+Math.random()*3;
+}
+
+// Input
+const keys={};
+let yaw=0,pitch=.12,locked=false;
+let vertical=0,grounded=true,walkPhase=0;
+let inCar=null,insideHome=false;
+const message=document.getElementById('message');
+
+addEventListener('keydown',e=>{
+ keys[e.code]=true;
+ if(["Space","ArrowUp","ArrowDown"].includes(e.code))e.preventDefault();
+ if(e.repeat)return;
+
+ if(e.code==="Space"&&!inCar&&!insideHome&&grounded){
+  vertical=7.5;grounded=false;
+ }
+ if(e.code==="KeyE")interact();
+ if(e.code==="KeyF")nearbyAction();
+});
+addEventListener('keyup',e=>keys[e.code]=false);
+
+renderer.domElement.addEventListener('click',()=>{
+ if(!insideHome)renderer.domElement.requestPointerLock?.();
+});
+document.addEventListener('pointerlockchange',()=>{
+ locked=document.pointerLockElement===renderer.domElement;
+});
+document.addEventListener('mousemove',e=>{
+ if(!locked)return;
+ yaw-=e.movementX*.0025;
+ pitch=THREE.MathUtils.clamp(pitch-e.movementY*.0015,-.35,.65);
+});
+
+function distXZ(a,b){
+ return Math.hypot(a.x-b.x,a.z-b.z);
+}
+
+function interact(){
+ if(insideHome){
+  insideHome=false;
+  kaushik.group.position.set(22,0,38);
+  message.textContent="Welcome back to the city!";
+  return;
+ }
+ if(inCar){
+  const car=inCar;
+  inCar=null;
+  car.player=false;
+  kaushik.group.visible=true;
+  kaushik.group.position.set(
+   car.g.position.x+3,0,car.g.position.z
+  );
+  message.textContent="You exited the car.";
+  return;
+ }
+
+ let nearest=null,best=7;
+ for(const c of cars){
+  const d=distXZ(kaushik.group.position,c.g.position);
+  if(d<best){best=d;nearest=c;}
+ }
+ if(nearest){
+  inCar=nearest;
+  nearest.player=true;
+  kaushik.group.visible=false;
+  message.textContent="Driving! W accelerate, S brake.";
+  return;
+ }
+
+ const home=buildingBoxes.find(b=>b.label==="KAUSHIK HOME");
+ if(home&&distXZ(kaushik.group.position,{x:home.x,z:home.z})<15){
+  insideHome=true;
+  message.textContent="Kaushik's home — press E to go outside.";
+ }
+}
+
+function nearbyAction(){
+ if(insideHome){
+  message.textContent="Home sweet home, Kaushik!";
+  return;
+ }
+ let closest=null,best=20;
+ for(const b of buildingBoxes){
+  const d=distXZ(kaushik.group.position,{x:b.x,z:b.z});
+  if(d<best){best=d;closest=b;}
+ }
+ if(closest){
+  message.textContent=closest.label?
+   "You are visiting: "+closest.label:
+   "A building in the Indian city.";
+ }else{
+  message.textContent="Explore the city to discover places.";
+ }
+}
+
+// Camera and movement
+const clock=new THREE.Clock();
+const target=new THREE.Vector3();
+function animate(){
+ requestAnimationFrame(animate);
+ const dt=Math.min(clock.getDelta(),.035);
+
+ if(!insideHome&&!inCar){
+  let f=0,s=0;
+  if(keys.KeyW||keys.ArrowUp)f++;
+  if(keys.KeyS||keys.ArrowDown)f--;
+  if(keys.KeyD||keys.ArrowRight)s++;
+  if(keys.KeyA||keys.ArrowLeft)s--;
+
+  const moving=f!==0||s!==0;
+  const running=!!keys.ShiftLeft||!!keys.ShiftRight;
+  const speed=running?12:6;
+
+  if(moving){
+   const len=Math.hypot(f,s);f/=len;s/=len;
+   const dx=-Math.sin(yaw)*f+Math.cos(yaw)*s;
+   const dz=-Math.cos(yaw)*f-Math.sin(yaw)*s;
+   kaushik.group.position.x+=dx*speed*dt;
+   kaushik.group.position.z+=dz*speed*dt;
+   kaushik.group.rotation.y=Math.atan2(dx,dz);
+
+   walkPhase+=dt*(running?14:9);
+   kaushik.legs.forEach((l,i)=>
+    l.rotation.x=Math.sin(walkPhase+i*Math.PI)*.7);
+   kaushik.arms.forEach((a,i)=>
+    a.rotation.x=Math.sin(walkPhase+i*Math.PI)*.5);
+  }else{
+   kaushik.legs.forEach(l=>l.rotation.x=0);
+   kaushik.arms.forEach(a=>a.rotation.x=0);
+  }
+
+  vertical-=19*dt;
+  kaushik.group.position.y+=vertical*dt;
+  if(kaushik.group.position.y<0){
+   kaushik.group.position.y=0;
+   vertical=0;grounded=true;
+  }
+  kaushik.group.position.x=THREE.MathUtils.clamp(
+   kaushik.group.position.x,-450,450);
+  kaushik.group.position.z=THREE.MathUtils.clamp(
+   kaushik.group.position.z,-450,450);
+ }else if(inCar){
+  const accelerating=!!keys.KeyW;
+  const braking=!!keys.KeyS;
+  const steering=(keys.KeyA?1:0)-(keys.KeyD?1:0);
+
+  if(accelerating)inCar.speed+=18*dt;
+  if(braking)inCar.speed-=25*dt;
+  inCar.speed*=Math.pow(.985,dt*60);
+  inCar.speed=THREE.MathUtils.clamp(inCar.speed,-10,42);
+
+  inCar.angle+=steering*dt*1.25*
+   Math.min(1,Math.abs(inCar.speed)/5);
+
+  // Rear-wheel drive style acceleration and controlled slip
+  inCar.g.rotation.y=inCar.angle;
+  inCar.g.position.x+=Math.sin(inCar.angle)*inCar.speed*dt;
+  inCar.g.position.z+=Math.cos(inCar.angle)*inCar.speed*dt;
+
+  inCar.wheels.forEach(w=>w.rotation.x+=inCar.speed*dt*1.5);
+
+  kaushik.group.position.copy(inCar.g.position);
+ }
+
+ // Traffic cars have moving wheels
+ for(const c of cars){
+  if(c===inCar||c.player)continue;
+  if(Math.abs(c.speed)>0){
+   c.g.position.x+=c.speed*dt;
+   if(c.g.position.x>480)c.g.position.x=-480;
+   c.wheels.forEach(w=>w.rotation.x+=c.speed*dt*1.5);
+  }
+ }
+
+ const focus=inCar?inCar.g.position:kaushik.group.position;
+ target.set(focus.x,focus.y+(inCar?1.8:2.4),focus.z);
+
+ if(insideHome){
+  // A simple home interior view
+  camera.position.lerp(new THREE.Vector3(22,5,48),.08);
+  camera.lookAt(22,2,30);
+ }else{
+  const distance=inCar?10:8;
+  const offset=new THREE.Vector3(
+   Math.sin(yaw)*distance,
+   3.2+pitch*6,
+   Math.cos(yaw)*distance
+  );
+  camera.position.lerp(target.clone().add(offset),
+   1-Math.exp(-5*dt));
+  camera.lookAt(target);
+ }
+
+ document.getElementById('mode').textContent=
+  insideHome?"At home":inCar?"Driving":"On foot";
+ document.getElementById('speed').textContent=
+  inCar?Math.round(Math.abs(inCar.speed)*3.6):0;
+
+ const pz=focus.z;
+ document.getElementById('place').textContent=
+  pz<-590?"Beach":pz>300?"Mountain Road":
+  pz>100?"Residential Area":"Indian City";
+
+ renderer.render(scene,camera);
+}
+animate();
+
+document.getElementById('play').onclick=()=>{
+ document.getElementById('start').style.display='none';
+ renderer.domElement.requestPointerLock?.();
+};
+
+addEventListener('resize',()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
