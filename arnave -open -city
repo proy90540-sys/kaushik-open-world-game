@@ -1,0 +1,347 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kaushik Open World</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+  #ui {
+    position: fixed; top: 12px; left: 12px; z-index: 2;
+    color: white; background: #101827dd; padding: 13px;
+    border-radius: 12px; line-height: 1.7;
+  }
+  #help {
+    position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+    color: white; background: #101827dd; padding: 10px 15px;
+    border-radius: 10px; text-align: center; width: max-content;
+    max-width: 95%; font-size: 13px;
+  }
+  #speed { font-size: 24px; font-weight: bold; color: #64eaff; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <b>🏙️ KAUSHIK OPEN WORLD</b><br>
+  Speed: <span id="speed">0</span> km/h<br>
+  <span id="gear">READY TO DRIVE</span>
+</div>
+<div id="help">W / ↑ Accelerate · S / ↓ Brake · A D / ← → Steer · Space Handbrake</div>
+
+<script type="module">
+import * as THREE from
+'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 100, 420);
+
+const camera = new THREE.PerspectiveCamera(
+  65, innerWidth / innerHeight, 0.1, 700
+);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x62734c, 2));
+
+const sun = new THREE.DirectionalLight(0xffffff, 3);
+sun.position.set(-40, 80, 35);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -100;
+sun.shadow.camera.right = 100;
+sun.shadow.camera.top = 100;
+sun.shadow.camera.bottom = -100;
+scene.add(sun);
+
+// Ground
+function box(w, h, d, color, x, y, z, parent = scene) {
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(w, h, d),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.85 })
+  );
+  mesh.position.set(x, y, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+
+box(1000, 0.5, 1000, 0x538448, 0, -0.35, 0);
+
+// Straight road running along the Z axis
+box(16, 0.08, 1000, 0x30343a, 0, -0.04, 0);
+
+// Road shoulders and sidewalks
+for (const side of [-1, 1]) {
+  box(0.35, 0.14, 1000, 0xb9b9b0, side * 8.15, 0.01, 0);
+  box(3, 0.12, 1000, 0xb9b9b0, side * 9.8, 0.03, 0);
+}
+
+// Dashed road markings
+for (let z = -490; z < 500; z += 12) {
+  box(0.16, 0.025, 5, 0xf7f0c7, 0, 0.02, z);
+}
+
+// Side lane markings
+for (const x of [-7, 7]) {
+  box(0.12, 0.025, 1000, 0xffffff, x, 0.025, 0);
+}
+
+// Buildings: always outside the road and sidewalks
+const buildingColliders = [];
+const palette = [
+  0xe7c8a2, 0xd8dfeb, 0xf0d4b8, 0xc1d7df,
+  0xe4b9a9, 0xd4d6b8, 0xb8c9e1, 0xe9e5d9
+];
+
+function makeBuilding(x, z, w, h, d, color) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  scene.add(group);
+
+  box(w, h, d, color, 0, h / 2, 0, group);
+
+  // Flat roof
+  box(w + 0.25, 0.22, d + 0.25, 0x777b82,
+      0, h + 0.08, 0, group);
+
+  // Front-facing windows, facing the road
+  const faceX = x < 0 ? w / 2 + 0.012 : -w / 2 - 0.012;
+  const rows = Math.max(1, Math.floor((h - 1.5) / 2.7));
+  const cols = Math.max(1, Math.floor((d - 1) / 2.5));
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const zz = -d / 2 + (c + 1) * d / (cols + 1);
+      const yy = 1.6 + r * 2.7;
+      box(0.045, 1.25, 1.0,
+        Math.random() > 0.25 ? 0x78b9d0 : 0xffe2a0,
+        faceX, yy, zz, group);
+    }
+  }
+
+  // Collision rectangle in world coordinates, with a safety margin
+  buildingColliders.push({
+    minX: x - w / 2 - 0.8,
+    maxX: x + w / 2 + 0.8,
+    minZ: z - d / 2 - 0.8,
+    maxZ: z + d / 2 + 0.8
+  });
+}
+
+for (let z = -480; z <= 480; z += 24) {
+  for (const side of [-1, 1]) {
+    const w = 9 + Math.random() * 5;
+    const d = 12 + Math.random() * 7;
+    const h = 9 + Math.random() * 32;
+
+    // Buildings start well outside road and sidewalk
+    const x = side * (16 + w / 2 + Math.random() * 7);
+    makeBuilding(
+      x, z + (Math.random() - 0.5) * 7,
+      w, h, d,
+      palette[Math.floor(Math.random() * palette.length)]
+    );
+  }
+}
+
+// Trees
+function makeTree(x, z) {
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.32, 2, 8),
+    new THREE.MeshStandardMaterial({ color: 0x725039 })
+  );
+  trunk.position.set(x, 1, z);
+  trunk.castShadow = true;
+  scene.add(trunk);
+
+  const leaves = new THREE.Mesh(
+    new THREE.SphereGeometry(1.6, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0x2e8140 })
+  );
+  leaves.position.set(x, 3.2, z);
+  leaves.scale.set(1, 1.15, 1);
+  leaves.castShadow = true;
+  scene.add(leaves);
+}
+
+for (let z = -470; z <= 470; z += 20) {
+  for (const side of [-1, 1]) {
+    makeTree(side * (13 + Math.random() * 2), z + 5);
+  }
+}
+
+// Player car
+const car = new THREE.Group();
+scene.add(car);
+car.position.set(0, 0.25, 0);
+
+const paint = new THREE.MeshStandardMaterial({
+  color: 0xe52632, metalness: 0.35, roughness: 0.3
+});
+const glass = new THREE.MeshStandardMaterial({
+  color: 0x243c4b, metalness: 0.25, roughness: 0.2
+});
+const rubber = new THREE.MeshStandardMaterial({ color: 0x17191c });
+const rim = new THREE.MeshStandardMaterial({
+  color: 0xc9d0d8, metalness: 0.8, roughness: 0.25
+});
+
+box(2.15, 0.65, 4.1, 0xe52632, 0, 0.55, 0, car);
+box(1.65, 0.8, 2.0, 0x263b4a, 0, 1.23, -0.25, car);
+box(1.95, 0.18, 1.0, 0xd71d29, 0, 1.68, -0.25, car);
+
+// Windshields
+box(1.58, 0.52, 0.06, 0x75b5ce, 0, 1.24, 0.77, car);
+box(1.58, 0.52, 0.06, 0x75b5ce, 0, 1.24, -1.26, car);
+
+// Lights
+for (const x of [-0.72, 0.72]) {
+  box(0.42, 0.18, 0.08, 0xfff1bc, x, 0.67, 2.08, car);
+  box(0.38, 0.16, 0.08, 0xff2020, x, 0.65, -2.08, car);
+}
+
+const wheels = [];
+for (const x of [-1.05, 1.05]) {
+  for (const z of [-1.35, 1.35]) {
+    const wheel = new THREE.Group();
+    wheel.position.set(x, 0.42, z);
+    car.add(wheel);
+
+    const tire = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.43, 0.43, 0.27, 20),
+      rubber
+    );
+    tire.rotation.z = Math.PI / 2;
+    tire.castShadow = true;
+    wheel.add(tire);
+
+    const hub = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.22, 0.22, 0.285, 12),
+      rim
+    );
+    hub.rotation.z = Math.PI / 2;
+    wheel.add(hub);
+
+    wheels.push({ group: wheel, front: z > 0 });
+  }
+}
+
+// Driving controls
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key))
+    e.preventDefault();
+});
+addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+addEventListener('blur', () => {
+  for (const k in keys) keys[k] = false;
+});
+
+let speed = 0;
+let heading = 0;
+const clock = new THREE.Clock();
+
+function collides(x, z) {
+  // Roadside boundary prevents driving through buildings or into the city blocks
+  if (Math.abs(x) > 6.0) return true;
+
+  // Solid building collision
+  for (const b of buildingColliders) {
+    if (x > b.minX && x < b.maxX &&
+        z > b.minZ && z < b.maxZ) return true;
+  }
+  return false;
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.04);
+
+  const forward = keys.w || keys.arrowup;
+  const backward = keys.s || keys.arrowdown;
+  const left = keys.a || keys.arrowleft;
+  const right = keys.d || keys.arrowright;
+  const handbrake = keys[' '];
+
+  if (forward) speed += 19 * dt;
+  else if (backward) speed -= 26 * dt;
+  else speed *= Math.exp(-1.3 * dt);
+
+  speed = THREE.MathUtils.clamp(speed, -10, handbrake ? 12 : 34);
+  if (handbrake) speed *= Math.exp(-2.4 * dt);
+
+  const steer = (left ? 1 : 0) - (right ? 1 : 0);
+  const steerFactor = Math.min(Math.abs(speed) / 5, 1);
+
+  if (Math.abs(speed) > 0.3) {
+    heading += steer * 1.65 * steerFactor * dt * Math.sign(speed);
+  }
+
+  // Heading zero means the car points toward negative Z
+  const dx = Math.sin(heading) * speed * dt;
+  const dz = -Math.cos(heading) * speed * dt;
+
+  // Axis-separated collision checks keep the car from passing through buildings
+  const nextX = car.position.x + dx;
+  if (!collides(nextX, car.position.z)) car.position.x = nextX;
+  else speed *= -0.12;
+
+  const nextZ = car.position.z + dz;
+  if (!collides(car.position.x, nextZ)) car.position.z = nextZ;
+  else speed *= -0.12;
+
+  car.rotation.y = heading;
+
+  for (const w of wheels) {
+    w.group.rotation.x += speed * dt / 0.43;
+    if (w.front) {
+      w.group.rotation.y = -steer * 0.35;
+    }
+  }
+
+  // Smooth third-person follow camera
+  const behind = new THREE.Vector3(
+    -Math.sin(heading) * 9,
+    5.2,
+    Math.cos(heading) * 9
+  );
+  const desired = car.position.clone().add(behind);
+  camera.position.lerp(desired, 1 - Math.exp(-4 * dt));
+  camera.lookAt(
+    car.position.x,
+    car.position.y + 1,
+    car.position.z
+  );
+
+  document.getElementById('speed').textContent =
+    Math.round(Math.abs(speed) * 3.6);
+  document.getElementById('gear').textContent =
+    speed > 0.5 ? 'DRIVE' : speed < -0.5 ? 'REVERSE' : 'READY TO DRIVE';
+
+  renderer.render(scene, camera);
+}
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+camera.position.set(0, 6, 12);
+animate();
+</script>
+</body>
+</html>
